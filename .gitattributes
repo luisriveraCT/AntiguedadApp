@@ -1,0 +1,15 @@
+* text=auto
+*.R eol=lf
+*.r eol=lf
+*.Rmd eol=lf
+*.qmd eol=lf
+*.md eol=lf
+*.rds binary
+*.RDS binary
+*.xlsx binary
+*.xlsm binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.sqlite binary
+*.db binary
