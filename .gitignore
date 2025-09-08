@@ -1,0 +1,52 @@
+$path = "C:\Dev\AntiguedadApp\.gitignore"
+@"
+# R & RStudio
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+.Rapp.history
+
+# Shiny temp/cache/logs
+rsconnect/
+.ShinyAppsLog/
+.shinylogs/
+logs/
+tmp/
+temp/
+
+# Local env / secrets
+.env
+.env.*
+.Renviron
+config.yml
+config.local.yml
+
+# Data & outputs not tracked
+data/
+Data/
+output/
+outputs/
+exports/
+reports/
+*.rds
+*.RDS
+*.sqlite
+*.db
+*.bak
+*.zip
+*.xlsx
+*.xlsm
+*.csv
+
+# OS noise
+Thumbs.db
+.DS_Store
+
+# OneDrive conflict files
+* - Conflicted copy*
+~$*
+"@ | Set-Content -Encoding utf8 $path
+
+# Verify it exists
+Get-Item $path
