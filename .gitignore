@@ -1,11 +1,12 @@
-$path = "C:\Dev\AntiguedadApp\.gitignore"
-@"
 # R & RStudio
 .Rproj.user/
 .Rhistory
 .RData
 .Ruserdata
 .Rapp.history
+.Rproj.user/
+.Rproj.user/*
+.Rproj.user/**
 
 # Shiny temp/cache/logs
 rsconnect/
@@ -15,14 +16,14 @@ logs/
 tmp/
 temp/
 
-# Local env / secrets
+# Local environment / secrets
 .env
 .env.*
 .Renviron
 config.yml
 config.local.yml
 
-# Data & outputs not tracked
+# Data & outputs you don't want in Git
 data/
 Data/
 output/
@@ -44,9 +45,5 @@ Thumbs.db
 .DS_Store
 
 # OneDrive conflict files
-* - Conflicted copy*
+* - Conflicted copy* 
 ~$*
-"@ | Set-Content -Encoding utf8 $path
-
-# Verify it exists
-Get-Item $path

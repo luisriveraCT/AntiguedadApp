@@ -1,9 +1,14 @@
+# Normalize line endings
 * text=auto
+
+# Keep R scripts with LF in the repo (Windows will still check out CRLF if configured)
 *.R eol=lf
 *.r eol=lf
 *.Rmd eol=lf
 *.qmd eol=lf
 *.md eol=lf
+
+# Ensure binary formats are treated as binary
 *.rds binary
 *.RDS binary
 *.xlsx binary
