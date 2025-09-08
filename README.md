@@ -1,0 +1,2 @@
+This application takes data generated from the invoice-creation process within SAP software, built to generate valuable insights and an essential day-to-day tool to plan, view, and audit cash flows with clients and suppliers. The app eliminates the need to download, interpret, correct, manipulate, and format data from SAP, tasks which create vulnerabilities and opportunities to increase efficiency. This dashboard presents essential information for the analysis of the company's health and direction, and strategic decision-making.
+
