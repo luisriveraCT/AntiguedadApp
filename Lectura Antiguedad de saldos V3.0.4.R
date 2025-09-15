@@ -1836,12 +1836,10 @@ observeEvent(input$more_files_ar, {
   }, ignoreInit = TRUE)
   
   # AP: add uploaded files ------------------------------------------------------------------------
-  # Ensure this exists once at app start (NOT inside the observer):
-  # files_selected_ar <- reactiveVal(character(0))
-  
-  observeEvent(input$more_files_ar, {
+
+  observeEvent(input$more_files_ap, {
     # 0) Read the upload df safely
-    df_up <- input$more_files_ar
+    df_up <- input$more_files_ap
     req(!is.null(df_up), is.data.frame(df_up), nrow(df_up) > 0)
     
     # 1) Extract vectors and sanitize
@@ -1862,7 +1860,7 @@ observeEvent(input$more_files_ar, {
     }
     
     # 2) Merge with current selection (no %||%)
-    cur <- files_selected_ar()
+    cur <- files_selected_ap()
     if (is.null(cur)) cur <- character(0)
     cur <- as.character(cur)
     
@@ -1887,7 +1885,7 @@ observeEvent(input$more_files_ar, {
     choices <- stats::setNames(as.character(new_all), show_names)
     
     # 5) Commit state first
-    files_selected_ar(new_all)
+    files_selected_ap(new_all)
     
     # 6) Update UI with guard (if it explodes, we get a readable message)
     tryCatch({
