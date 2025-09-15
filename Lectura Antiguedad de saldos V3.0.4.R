@@ -898,7 +898,7 @@ empty_moves <- tibble::tibble(
 load_moves <- function() {
   if (file.exists(MOVES_PATH)) readRDS(MOVES_PATH) else empty_moves
 }
-save_moves <- function(x) saveRDS(x, MOVES_PATH)
+
 
 # rows_upsert fallback (for dplyr < 1.1)
 upsert_moves <- function(db, rows) {
