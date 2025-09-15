@@ -1264,51 +1264,89 @@ server <- function(input, output, session) {
   
   
   # AR: pick/unpick files -------------------------------
-  observeEvent(input$files_pick_ar, {
-    files_selected_ar(input$files_pick_ar %||% character(0))
-  }, ignoreInit = TRUE)
-  
-  # AR: add uploaded files ---------------------------
-  observeEvent(input$more_files_ar, {
-    df <- req(input$more_files_ar)  # data.frame: name, datapath, type, size
-    
-    # 1) Only accept Excel
-    keep <- tolower(tools::file_ext(df$name)) %in% c("xlsx", "xls")
-    if (any(!keep)) {
-      bad <- df$name[!keep]
-      showNotification(
-        paste0("Archivo(s) no Excel ignorado(s): ", paste(bad, collapse = ", ")),
-        type = "warning"
-      )
-    }
-    if (!any(keep)) return(invisible(NULL))
-    
-    # 2) Normalize paths and labels
-    new_paths  <- normalizePath(df$datapath[keep], winslash = "/", mustWork = FALSE)
-    new_labels <- df$name[keep]
-    
-    # 3) Update label map (path -> filename)
-    lbl_map <- files_labels_ar()
-    lbl_map[new_paths] <- new_labels
-    files_labels_ar(lbl_map)
-    
-    # 4) Merge with existing selection
-    new_all <- unique(c(files_selected_ar(), new_paths))
-    files_selected_ar(new_all)
-    
-    # 5) Build choices with safe, non-NA names (fallback to basename)
-    choices <- new_all
-    names(choices) <- vapply(choices, function(p) {
-      nm <- lbl_map[[p]]
-      if (is.null(nm) || is.na(nm) || !nzchar(nm)) basename(p) else nm
-    }, character(1))
-    
+  # ---- Ensure the reactive exists once (outside the observer) ----
+# If candidate_files_ar might be NULL or non-character, coerce safely:
+files_selected_ar <- reactiveVal({
+  x <- get0("candidate_files_ar", ifnotfound = character(0))
+  x <- as.character(x)
+  x[!is.na(x) & nzchar(x) & file.exists(x)]
+})
+
+# ---- AR: add uploaded files (robust) ----
+observeEvent(input$more_files_ar, {
+  df_up <- input$more_files_ar
+  req(!is.null(df_up), is.data.frame(df_up), nrow(df_up) > 0)
+
+  # 1) Extract and sanitize new uploads
+  paths <- df_up$datapath
+  disp  <- df_up$name
+
+  if (is.null(paths)) paths <- character(0)
+  if (is.null(disp))  disp  <- basename(paths)
+
+  paths <- as.character(paths)
+  disp  <- as.character(disp)
+
+  ok <- !is.na(paths) & nzchar(paths) & file.exists(paths)
+  paths <- paths[ok]
+  disp  <- disp[ok]
+
+  if (!length(paths)) {
+    showNotification("No se recibió ningún archivo válido (CxC).", type = "warning")
+    return(invisible(NULL))
+  }
+
+  # 2) Merge with current set (coerce to clean character)
+  cur <- files_selected_ar()
+  if (is.null(cur)) cur <- character(0)
+  cur <- as.character(cur)
+  cur <- cur[!is.na(cur) & nzchar(cur)]
+
+  new_all <- unique(as.character(c(cur, paths)))
+
+  # 3) Build human labels for EVERY value in new_all
+  #    name_map must have character keys; values must be character
+  name_map <- setNames(disp, paths)
+
+  safe_label <- function(p) {
+    p <- as.character(p)  # <- critical: ensure character indexing
+    nm <- name_map[[p]]
+    if (is.null(nm) || is.na(nm) || !nzchar(nm)) basename(p) else nm
+  }
+
+  show_names <- vapply(new_all, safe_label, FUN.VALUE = character(1))
+  show_names <- make.unique(show_names, sep = " ")
+
+  # 4) Final choices (names=labels, values=paths)
+  stopifnot(length(show_names) == length(new_all))
+  choices <- stats::setNames(new_all, show_names)
+
+  # 5) Persist the list of available/selected paths
+  files_selected_ar(new_all)
+
+  # 6) Update UI (guarded)
+  tryCatch({
     updateCheckboxGroupInput(
       session, "files_pick_ar",
       choices  = choices,
       selected = new_all
     )
-  }, ignoreInit = TRUE)
+  }, error = function(e) {
+    # Fallback to basenames if labels break for any reason
+    fallback_labels  <- make.unique(basename(new_all), sep = " ")
+    fallback_choices <- stats::setNames(new_all, fallback_labels)
+    updateCheckboxGroupInput(
+      session, "files_pick_ar",
+      choices  = fallback_choices,
+      selected = new_all
+    )
+    showNotification(
+      paste("Advertencia al actualizar lista de archivos (CxC):", conditionMessage(e)),
+      type = "warning", duration = 8
+    )
+  })
+}, ignoreInit = TRUE)
+
   
   #------------------------------------------
   
@@ -1798,30 +1836,83 @@ server <- function(input, output, session) {
   }, ignoreInit = TRUE)
   
   # AP: add uploaded files ------------------------------------------------------------------------
-  observeEvent(input$more_files_ap, {
-    df <- req(input$more_files_ap)        # data.frame with $name, $datapath, $type, $size
-    new_paths  <- normalizePath(df$datapath, winslash = "/", mustWork = FALSE)
-    new_labels <- df$name                  # <-- real filenames to show
+  # Ensure this exists once at app start (NOT inside the observer):
+  # files_selected_ar <- reactiveVal(character(0))
+  
+  observeEvent(input$more_files_ar, {
+    # 0) Read the upload df safely
+    df_up <- input$more_files_ar
+    req(!is.null(df_up), is.data.frame(df_up), nrow(df_up) > 0)
     
-    # Update the label map (path -> display name), keeping any existing labels
-    lbl_map <- files_labels_ap()
-    lbl_map[new_paths] <- new_labels
-    files_labels_ap(lbl_map)
+    # 1) Extract vectors and sanitize
+    paths <- df_up$datapath
+    disp  <- df_up$name
     
-    # Merge with whatever was already selected
-    new_all <- unique(c(files_selected_ap(), new_paths))
-    files_selected_ap(new_all)
+    # Fallbacks & filters
+    if (is.null(paths)) paths <- character(0)
+    if (is.null(disp))  disp  <- basename(paths)
     
-    # Build named choices: values = paths, names = display labels
-    choices <- new_all
-    names(choices) <- lbl_map[choices]
+    ok <- !is.na(paths) & nzchar(paths) & file.exists(paths)
+    paths <- as.character(paths[ok])
+    disp  <- as.character(disp[ok])
     
-    updateCheckboxGroupInput(
-      session, "files_pick_ap",
-      choices  = choices,
-      selected = new_all
-    )
-  }, ignoreInit = TRUE) #------------------------------------------------------------
+    if (!length(paths)) {
+      showNotification("No se recibió ningún archivo válido (CxC).", type = "warning")
+      return(invisible(NULL))
+    }
+    
+    # 2) Merge with current selection (no %||%)
+    cur <- files_selected_ar()
+    if (is.null(cur)) cur <- character(0)
+    cur <- as.character(cur)
+    
+    new_all <- unique(c(cur, paths))
+    
+    # 3) Build a robust label for each *value* in new_all
+    #    Prefer the user-facing upload name; fallback to basename(path)
+    name_map <- setNames(disp, paths)
+    
+    safe_label <- function(p) {
+      nm <- name_map[[p]]
+      if (is.null(nm) || is.na(nm) || !nzchar(nm)) basename(p) else nm
+    }
+    
+    # vapply with fixed type avoids weird recycling
+    show_names <- vapply(new_all, safe_label, FUN.VALUE = character(1))
+    # Make labels unique (Shiny dislikes duplicate names)
+    show_names <- make.unique(show_names, sep = " ")
+    
+    # 4) Final choices vector (names=labels, values=paths), lengths must match
+    stopifnot(length(show_names) == length(new_all))
+    choices <- stats::setNames(as.character(new_all), show_names)
+    
+    # 5) Commit state first
+    files_selected_ar(new_all)
+    
+    # 6) Update UI with guard (if it explodes, we get a readable message)
+    tryCatch({
+      updateCheckboxGroupInput(
+        session, "files_pick_ar",
+        choices  = choices,
+        selected = new_all
+      )
+    }, error = function(e) {
+      # Minimal fallback: use basenames and clear selection
+      fallback_labels <- make.unique(basename(new_all), sep = " ")
+      fallback_choices <- stats::setNames(as.character(new_all), fallback_labels)
+      
+      updateCheckboxGroupInput(
+        session, "files_pick_ar",
+        choices  = fallback_choices,
+        selected = new_all
+      )
+      showNotification(
+        paste("Advertencia al actualizar lista de archivos (se usaron nombres básicos):", conditionMessage(e)),
+        type = "warning", duration = 8
+      )
+    })
+  }, ignoreInit = TRUE)
+  #------------------------------------------------------------
   
   
   #======================================================= Process files, but for Acc Payable AP
