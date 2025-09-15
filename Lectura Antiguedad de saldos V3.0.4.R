@@ -17,28 +17,33 @@ rm_functions <- function(env = .GlobalEnv) {
 # use:
 rm_functions()#---------------------------------------------
 
-#---------------------- Check for markdown --------------------
-# 1) Ensure you're in the project and renv is active
-renv::activate()
-# 2) Install the missing dependency
-renv::install("markdown")
-# 3) Snapshot to lock it in for everyone
-renv::snapshot()
-
-
-
-library(scales)
-libraries <- c("shiny", "DBI", "RSQLite", "renv", "pool", "ggtext", "grid", "RODBC", "bslib", "DT", "openxlsx", "quantmod", "readr", "ggplot2", "readxl", "dplyr", "tidyr", "shinyWidgets", "scales", "lubridate", "stringr")
-for (i in libraries) {
-  if (!i %in% installed.packages()) {
-    install.packages(i)
-    update.packages(ask = FALSE)
-    lapply(i, library, character.only = T)
-  } else {
-    lapply(i, library, character.only = T)
-  }
+# =========================================== Simpler installer ==================================
+needed <- c("shiny","DBI","RSQLite","knitr","pool","ggtext","grid","RODBC","bslib",
+            "DT","openxlsx","quantmod","readr","ggplot2","readxl","dplyr","tidyr",
+            "shinyWidgets","scales","lubridate","stringr")
+missing <- setdiff(needed, rownames(installed.packages()))
+if (length(missing)) {
+  install.packages(missing, type = "binary")
 }
-rm(i)
+invisible(lapply(needed, library, character.only = TRUE))
+# =================================================================================================
+
+#========================================================== MAIN INSTALLER ========================================
+# library(scales)
+# libraries <- c("shiny", "DBI", "RSQLite","knitr", "renv", "pool", "ggtext", "grid", "RODBC", "bslib", "DT", "openxlsx", 
+#               "magrittr", "quantmod", "readr", "ggplot2", "readxl", "dplyr", "tidyr", "shinyWidgets", "scales", "lubridate", "stringr")
+# for (i in libraries) {
+#   if (!i %in% installed.packages()) {
+#     install.packages(i) # ---------------- Add , prompt=FALSE if packages are not loading properly or asking for approval.
+#     update.packages(ask = FALSE)
+#     lapply(i, library, character.only = T)
+#   } else {
+#     lapply(i, library, character.only = T)
+#   }
+# }
+# rm(i)
+#=================================================================================================================
+
 #==================================================================== APP CONFIG =============================================
 # === CONFIG: where to store the central SQLite DB ===
 
@@ -834,12 +839,89 @@ apply_ic_filter <- function(df, mode = "exclude", code_col = NULL, ic_codes_norm
   }
 }
 
-# Minimal settings container (skip if you already have one + UI to edit it)
-# interco_settings() should return a list: list(ar_clients = <char>, ap_suppliers = <char>)
-if (!exists("interco_settings")) {
-  interco_settings <- reactiveVal(list(ar_clients = character(0), ap_suppliers = character(0)))
+# ======================================================= Excel management HELPERS .xslx ============
+safe_read_ar <- function(p) {
+  tryCatch({
+    df  <- read_clean_antiguedad(p)
+    key <- extract_company_date(p)
+    nm  <- paste0(
+      key$company,
+      if (!is.na(key$date)) paste0(" | ", format(key$date, "%Y-%m-%d")) else "",
+      " | ", basename(p)
+    )
+    attr(df, "table_name") <- nm
+    attr(df, "path")       <- p
+    df
+  }, error = function(e) {
+    warning(sprintf("[AR] %s: %s", basename(p), conditionMessage(e)))
+    attr(NULL, "path") <- p
+    NULL
+  })
 }
 
+process_antiguedad_files <- function(paths) {
+  res <- lapply(paths, safe_read_ar)
+  ok  <- Filter(Negate(is.null), res)
+  if (!length(ok)) stop("No se pudo leer ningún archivo válido (CxC).")
+  
+  names(ok) <- vapply(ok, function(df) attr(df, "table_name"), character(1))
+  
+  # Notify about skipped files (if any)
+  read_paths <- vapply(ok, function(df) attr(df, "path"), character(1))
+  skipped    <- setdiff(paths, read_paths)
+  if (length(skipped)) {
+    showNotification(
+      paste0("Se omitieron ", length(skipped), " archivo(s) inválido(s): ",
+             paste(basename(skipped), collapse = ", ")),
+      type = "warning", duration = 8
+    )
+  }
+  ok
+}
+
+# ===================== now for AP
+safe_read_ap <- function(p) {
+  tryCatch({
+    df  <- read_clean_pagar(p)
+    key <- extract_company_date(p)
+    nm  <- paste0(
+      key$company,
+      if (!is.na(key$date)) paste0(" | ", format(key$date, "%Y-%m-%d")) else "",
+      " | ", basename(p)
+    )
+    attr(df, "table_name") <- nm
+    attr(df, "path")       <- p
+    df
+  }, error = function(e) {
+    warning(sprintf("[AP] %s: %s", basename(p), conditionMessage(e)))
+    attr(NULL, "path") <- p
+    NULL
+  })
+}
+
+process_pagar_files <- function(paths) {
+  res <- lapply(paths, safe_read_ap)
+  ok  <- Filter(Negate(is.null), res)
+  if (!length(ok)) stop("No se pudo leer ningún archivo válido (CxP).")
+  
+  names(ok) <- vapply(ok, function(df) attr(df, "table_name"), character(1))
+  
+  read_paths <- vapply(ok, function(df) attr(df, "path"), character(1))
+  skipped    <- setdiff(paths, read_paths)
+  if (length(skipped)) {
+    showNotification(
+      paste0("Se omitieron ", length(skipped), " archivo(s) inválido(s): ",
+             paste(basename(skipped), collapse = ", ")),
+      type = "warning", duration = 8
+    )
+  }
+  ok
+}
+#---------------------------------------------------------------------------------------------------
+
+
+
+#------------------------------------------------ Intercompany Reactive function
 
 load_interco <- function() {
   if (file.exists(INTERCO_PATH)) {
@@ -1030,8 +1112,8 @@ server <- function(input, output, session) {
   interco_settings <- reactiveVal(load_interco()) #======== INTERCOMPANY =============================
   
   observeEvent(input$edit_interco, {
-    cur <- interco_settings()
-    showModal(modalDialog(
+    cur <- interco_settings() # --------- Reads current values
+    showModal(modalDialog( # -------------- Show the modal
       title = "Configurar intercompany",
       size = "m", easyClose = TRUE,
       footer = tagList(
@@ -1056,7 +1138,7 @@ server <- function(input, output, session) {
     ))
   })
   
-  observeEvent(input$save_interco, {
+  observeEvent(input$save_interco, { # ------------------------------- saves intercompany data and updates Settings.
     clients   <- normalize_code(unlist(strsplit(input$ic_clients_txt   %||% "", "\n", fixed = TRUE)))
     suppliers <- normalize_code(unlist(strsplit(input$ic_suppliers_txt %||% "", "\n", fixed = TRUE)))
     clients   <- clients[nzchar(clients)]
@@ -1083,7 +1165,7 @@ server <- function(input, output, session) {
   obs_move_ap_grp   <- reactiveVal(NULL)
   #-----------------------------------------------------
   # ============================================ AR state ============================================
-  files_selected_ar     <- reactiveVal(candidate_files)
+  files_selected_ar     <- reactiveVal(candidate_files_ar)
   tables_by_company_ar  <- reactiveVal(NULL)
   df_raw_multi_ar       <- reactiveVal(NULL)
   moves_db_ar           <- reactiveVal(load_moves())        # AR persistence (invoice_moves.rds)
@@ -1094,6 +1176,9 @@ server <- function(input, output, session) {
     message("Moves loaded: ", nrow(db))
   })
   
+  # Stores the *display* name for each temp path
+  files_labels_ar <- reactiveVal(setNames(character(0), character(0)))
+  files_labels_ap <- reactiveVal(setNames(character(0), character(0)))
   
   
   # Optional log (fixed to use moves_db_ar)
@@ -1173,22 +1258,54 @@ server <- function(input, output, session) {
     df_raw_multi_ar(df)
   }
   
-  # AR: pick/unpick files
+  # AR: pick/unpick files -------------------------------
   observeEvent(input$files_pick_ar, {
     files_selected_ar(input$files_pick_ar %||% character(0))
   }, ignoreInit = TRUE)
   
-  # AR: add uploaded files
+  # AR: add uploaded files ---------------------------
   observeEvent(input$more_files_ar, {
-    req(input$more_files_ar$datapath)
-    new_all <- unique(c(files_selected_ar(), input$more_files_ar$datapath))
+    df <- req(input$more_files_ar)  # data.frame: name, datapath, type, size
+    
+    # 1) Only accept Excel
+    keep <- tolower(tools::file_ext(df$name)) %in% c("xlsx", "xls")
+    if (any(!keep)) {
+      bad <- df$name[!keep]
+      showNotification(
+        paste0("Archivo(s) no Excel ignorado(s): ", paste(bad, collapse = ", ")),
+        type = "warning"
+      )
+    }
+    if (!any(keep)) return(invisible(NULL))
+    
+    # 2) Normalize paths and labels
+    new_paths  <- normalizePath(df$datapath[keep], winslash = "/", mustWork = FALSE)
+    new_labels <- df$name[keep]
+    
+    # 3) Update label map (path -> filename)
+    lbl_map <- files_labels_ar()
+    lbl_map[new_paths] <- new_labels
+    files_labels_ar(lbl_map)
+    
+    # 4) Merge with existing selection
+    new_all <- unique(c(files_selected_ar(), new_paths))
     files_selected_ar(new_all)
+    
+    # 5) Build choices with safe, non-NA names (fallback to basename)
+    choices <- new_all
+    names(choices) <- vapply(choices, function(p) {
+      nm <- lbl_map[[p]]
+      if (is.null(nm) || is.na(nm) || !nzchar(nm)) basename(p) else nm
+    }, character(1))
+    
     updateCheckboxGroupInput(
       session, "files_pick_ar",
-      choices  = setNames(new_all, basename(new_all)),
+      choices  = choices,
       selected = new_all
     )
   }, ignoreInit = TRUE)
+  
+  #------------------------------------------
   
   # =================================== AR: process files -> combined df =============================
   observeEvent(input$process_files_ar, {
@@ -1655,6 +1772,38 @@ server <- function(input, output, session) {
       dplyr::group_by(Fecha, Moneda, Parte) %>%
       dplyr::summarise(Importe = sum(Importe, na.rm = TRUE), .groups = "drop")
   })
+  
+  
+  # AP: pick/unpick files -----------------------------------------------------------------------
+  observeEvent(input$files_pick_ap, {
+    files_selected_ap(input$files_pick_ap %||% character(0))
+  }, ignoreInit = TRUE)
+  
+  # AP: add uploaded files ------------------------------------------------------------------------
+  observeEvent(input$more_files_ap, {
+    df <- req(input$more_files_ap)        # data.frame with $name, $datapath, $type, $size
+    new_paths  <- normalizePath(df$datapath, winslash = "/", mustWork = FALSE)
+    new_labels <- df$name                  # <-- real filenames to show
+    
+    # Update the label map (path -> display name), keeping any existing labels
+    lbl_map <- files_labels_ap()
+    lbl_map[new_paths] <- new_labels
+    files_labels_ap(lbl_map)
+    
+    # Merge with whatever was already selected
+    new_all <- unique(c(files_selected_ap(), new_paths))
+    files_selected_ap(new_all)
+    
+    # Build named choices: values = paths, names = display labels
+    choices <- new_all
+    names(choices) <- lbl_map[choices]
+    
+    updateCheckboxGroupInput(
+      session, "files_pick_ap",
+      choices  = choices,
+      selected = new_all
+    )
+  }, ignoreInit = TRUE) #------------------------------------------------------------
   
   
   #======================================================= Process files, but for Acc Payable AP
