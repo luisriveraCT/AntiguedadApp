@@ -388,14 +388,6 @@ process_pagar_files <- function(paths) {
 }#=======================================================================================
 
 #=========================================COMPANY MAP HELPER - classify files and extract company
-# Map initials to company names (unchanged)
-COMPANY_MAP <- c(
-  "NG"  = "Networks Group",
-  "NTS" = "Networks Trucking Services",
-  "NCS" = "Networks Crossdocking Services",
-  "N&L" = "Networks & Logistics",
-  "NRS" = "Networks Realtors"
-)
 
 # Detect ledger (AR/AP) and company initials from the FILE NAME (not the sheet)
 # - AR if name has "clientes"
