@@ -1184,36 +1184,48 @@ server <- function(input, output, session) {
   # --- AR helper: apply a move; if new_date == original, clear the move instead of upserting
   apply_move_ar <- function(selected_keys, new_date) {
     # selected_keys must have: Empresa, Moneda, Documento
+    if (is.null(selected_keys) || !nrow(selected_keys)) return(invisible(NULL))
+    new_date <- as.Date(new_date)
+    
     df <- df_raw_multi_ar()
     db <- moves_db_ar()
     
-    # Map each doc to its original date
+    # Ensure original due date is Date
+    if ("FechaVenc_Original" %in% names(df)) {
+      df$FechaVenc_Original <- as.Date(df$FechaVenc_Original)
+    } else {
+      stop("No se encontró la columna 'FechaVenc_Original' en AR.")
+    }
+    
+    # Unique original date per (Empresa, Moneda, Documento)
     orig_map <- df %>%
       dplyr::select(Empresa, Moneda, Documento, FechaVenc_Original) %>%
-      dplyr::distinct()
+      dplyr::filter(!is.na(Documento)) %>%
+      dplyr::group_by(Empresa, Moneda, Documento) %>%
+      dplyr::slice(1) %>%
+      dplyr::ungroup()
     
     keys <- selected_keys %>%
       dplyr::distinct(Empresa, Moneda, Documento) %>%
       dplyr::left_join(orig_map, by = c("Empresa","Moneda","Documento")) %>%
       dplyr::mutate(
-        FechaVenc_Proyectada = as.Date(new_date),
+        FechaVenc_Proyectada = new_date,
         last_updated         = Sys.time()
       )
     
-    # Split into: clear (revert to original) vs upsert (projected != original)
-    to_clear  <- keys %>% dplyr::filter(FechaVenc_Proyectada == FechaVenc_Original)
-    to_upsert <- keys %>% dplyr::filter(FechaVenc_Proyectada != FechaVenc_Original)
+    # Split into: clear (projected==original) vs upsert (different or unknown original)
+    to_clear  <- keys %>% dplyr::filter(!is.na(FechaVenc_Original) & FechaVenc_Proyectada == FechaVenc_Original)
+    to_upsert <- keys %>% dplyr::filter(is.na(FechaVenc_Original) | FechaVenc_Proyectada != FechaVenc_Original)
     
-    # ---- Persist DB ----
+    # ---- Persist ----
     if (nrow(to_clear)) {
-      # remove any existing move rows for these docs
-      db <- dplyr::anti_join(db,
-                             to_clear %>% dplyr::select(Empresa, Moneda, Documento),
-                             by = c("Empresa","Moneda","Documento")
+      db <- dplyr::anti_join(
+        db,
+        to_clear %>% dplyr::select(Empresa, Moneda, Documento),
+        by = c("Empresa","Moneda","Documento")
       )
     }
     if (nrow(to_upsert)) {
-      # upsert (insert or update) projected date
       stopifnot(exists("upsert_moves", mode = "function"))
       db <- upsert_moves(
         db,
@@ -1222,14 +1234,14 @@ server <- function(input, output, session) {
     }
     
     moves_db_ar(db)
-    save_moves(db)
+    # For AR we usually have save_moves(); keep atomic writer if present
+    if (exists("save_moves", mode = "function")) save_moves(db)
     
     # ---- Update in-memory df so UI refreshes immediately ----
     idx_for <- function(keys_df) {
       if (!nrow(keys_df)) return(integer(0))
       dplyr::inner_join(
-        df %>% dplyr::mutate(.idx = dplyr::row_number()) %>%
-          dplyr::select(.idx, Empresa, Moneda, Documento),
+        df %>% dplyr::mutate(.idx = dplyr::row_number()) %>% dplyr::select(.idx, Empresa, Moneda, Documento),
         keys_df %>% dplyr::select(Empresa, Moneda, Documento),
         by = c("Empresa","Moneda","Documento")
       )$.idx
@@ -1243,12 +1255,13 @@ server <- function(input, output, session) {
       df$FechaEff[i_clear]             <- df$FechaVenc_Original[i_clear]
     }
     if (length(i_upsert)) {
-      df$FechaVenc_Proyectada[i_upsert] <- as.Date(new_date)
-      df$FechaEff[i_upsert]             <- as.Date(new_date)
+      df$FechaVenc_Proyectada[i_upsert] <- new_date
+      df$FechaEff[i_upsert]             <- new_date
     }
     
     df_raw_multi_ar(df)
   }
+  
   
   # AR: pick/unpick files -------------------------------
   observeEvent(input$files_pick_ar, {
@@ -1676,25 +1689,38 @@ server <- function(input, output, session) {
   # --- AP helper: apply a move; if new_date == original, clear the move instead of upserting
   apply_move_ap <- function(selected_keys, new_date) {
     # selected_keys must have: Empresa, Moneda, Documento
+    if (is.null(selected_keys) || !nrow(selected_keys)) return(invisible(NULL))
+    new_date <- as.Date(new_date)
+    
     df <- df_raw_multi_ap()
     db <- moves_db_ap()
     
-    # Map each doc to its original date
+    # Ensure original due date is Date
+    if ("FechaVenc_Original" %in% names(df)) {
+      df$FechaVenc_Original <- as.Date(df$FechaVenc_Original)
+    } else {
+      stop("No se encontró la columna 'FechaVenc_Original' en AP.")
+    }
+    
+    # Map each doc to its original date (unique per doc)
     orig_map <- df %>%
       dplyr::select(Empresa, Moneda, Documento, FechaVenc_Original) %>%
-      dplyr::distinct()
+      dplyr::filter(!is.na(Documento)) %>%
+      dplyr::group_by(Empresa, Moneda, Documento) %>%
+      dplyr::slice(1) %>%             # keep first if dupes ever slip in
+      dplyr::ungroup()
     
     keys <- selected_keys %>%
       dplyr::distinct(Empresa, Moneda, Documento) %>%
       dplyr::left_join(orig_map, by = c("Empresa","Moneda","Documento")) %>%
       dplyr::mutate(
-        FechaVenc_Proyectada = as.Date(new_date),
+        FechaVenc_Proyectada = new_date,
         last_updated         = Sys.time()
       )
     
     # Split into: clear (revert to original) vs upsert (projected != original)
-    to_clear  <- keys %>% dplyr::filter(FechaVenc_Proyectada == FechaVenc_Original)
-    to_upsert <- keys %>% dplyr::filter(FechaVenc_Proyectada != FechaVenc_Original)
+    to_clear  <- keys %>% dplyr::filter(!is.na(FechaVenc_Original) & FechaVenc_Proyectada == FechaVenc_Original)
+    to_upsert <- keys %>% dplyr::filter(is.na(FechaVenc_Original) | FechaVenc_Proyectada != FechaVenc_Original)
     
     # ---- Persist DB ----
     if (nrow(to_clear)) {
@@ -1719,8 +1745,7 @@ server <- function(input, output, session) {
     idx_for <- function(keys_df) {
       if (!nrow(keys_df)) return(integer(0))
       dplyr::inner_join(
-        df %>% dplyr::mutate(.idx = dplyr::row_number()) %>%
-          dplyr::select(.idx, Empresa, Moneda, Documento),
+        df %>% dplyr::mutate(.idx = dplyr::row_number()) %>% dplyr::select(.idx, Empresa, Moneda, Documento),
         keys_df %>% dplyr::select(Empresa, Moneda, Documento),
         by = c("Empresa","Moneda","Documento")
       )$.idx
@@ -1734,12 +1759,13 @@ server <- function(input, output, session) {
       df$FechaEff[i_clear]             <- df$FechaVenc_Original[i_clear]
     }
     if (length(i_upsert)) {
-      df$FechaVenc_Proyectada[i_upsert] <- as.Date(new_date)
-      df$FechaEff[i_upsert]             <- as.Date(new_date)
+      df$FechaVenc_Proyectada[i_upsert] <- new_date
+      df$FechaEff[i_upsert]             <- new_date
     }
     
     df_raw_multi_ap(df)
   }
+  
   #---------------------------------------------------------------------------
   
   # ---- AP: build day x vendor table (reactive) ----
