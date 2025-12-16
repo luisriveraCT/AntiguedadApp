@@ -578,20 +578,8 @@ aws.s3::put_object(
 message("RDS files uploaded to S3")
 
 
-
-aws.s3::put_object(
-  file = ar_rds,
-  object = "clientes_daily.rds",
-  bucket = S3_BUCKET
-)
-
-aws.s3::put_object(
-  file = ap_rds,
-  object = "proveedores_daily.rds",
-  bucket = S3_BUCKET
-)
-
 message("RDS files uploaded to S3")
+
 
 
 
