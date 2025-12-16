@@ -91,7 +91,42 @@ ensure_moneda <- function(df) {
 # Project paths
 # ---------------------------------------------------------
 #C:/Users/luisr/Documents/Proyectos de Integracion/BackupApp/Exceles para la app build_data
-DATA_DIR <- "data"
+
+S3_BUCKET <- Sys.getenv("S3_BUCKET") # -------------------AWS S3
+INPUT_PREFIX <- "excel/"
+WORK_DIR <- tempdir()# ----------------------------------------
+DATA_DIR <- WORK_DIR
+dir.create(DATA_DIR, showWarnings = FALSE, recursive = TRUE)
+
+message("Using temp work dir: ", WORK_DIR)
+
+# List Excel files in S3 input folder
+excel_keys <- aws.s3::get_bucket_df(
+  bucket = S3_BUCKET,
+  prefix = INPUT_PREFIX
+)$Key
+
+excel_keys <- excel_keys[grepl("\\.xlsx$", excel_keys, ignore.case = TRUE)]
+
+if (length(excel_keys) == 0) {
+  stop("No Excel files found in S3 input folder")
+}
+
+message("Found ", length(excel_keys), " Excel files in S3")
+
+# Download Excel files to temp directory
+local_excel_files <- character(0)
+
+for (key in excel_keys) {
+  local_path <- file.path(WORK_DIR, basename(key))
+  aws.s3::save_object(
+    object = key,
+    bucket = S3_BUCKET,
+    file = local_path
+  )
+  local_excel_files <- c(local_excel_files, local_path)
+}
+
 #data
 FAST_AR <- file.path(DATA_DIR, "clientes_daily.rds")
 FAST_AP <- file.path(DATA_DIR, "proveedores_daily.rds")
@@ -503,7 +538,7 @@ read_goods <- function(paths) {
 
 message("Searching for Excel files in: ", DATA_DIR)
 
-files <- list_antiguedad_files(DATA_DIR)
+files <- local_excel_files
 split <- split_paths_by_ledger(files)
 
 message("AR files: ", length(split$ar))
@@ -528,38 +563,35 @@ message("  - ", FAST_AP)
 #  AMAZON AWS S3 DATABASE UPLOAD
 #=======================================================================
 
-S3_BUCKET <- "antiguedad-rds-prod"
-
-message("Uploading RDS files to S3...")
-
-put_object(
-  file = FAST_AR,
+aws.s3::put_object(
+  file   = FAST_AR,
   object = "clientes_daily.rds",
   bucket = S3_BUCKET
 )
 
-put_object(
-  file = FAST_AP,
+aws.s3::put_object(
+  file   = FAST_AP,
   object = "proveedores_daily.rds",
   bucket = S3_BUCKET
 )
 
-message("S3 upload complete.")
+message("RDS files uploaded to S3")
 
-bucket <- Sys.getenv("S3_BUCKET")
 
-aws.s3::s3saveRDS(
-  object = clientes_daily,
-  bucket = bucket,
-  object = "clientes_daily.rds"
+
+aws.s3::put_object(
+  file = ar_rds,
+  object = "clientes_daily.rds",
+  bucket = S3_BUCKET
 )
 
-aws.s3::s3saveRDS(
-  object = proveedores_daily,
-  bucket = bucket,
-  object = "proveedores_daily.rds"
+aws.s3::put_object(
+  file = ap_rds,
+  object = "proveedores_daily.rds",
+  bucket = S3_BUCKET
 )
 
-message("✅ RDS files uploaded to S3")
+message("RDS files uploaded to S3")
+
 
 
